@@ -1,103 +1,293 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import {
+  AlertCircle,
+  CheckCircle,
+  Download,
+  Loader2,
+  Upload,
+  X,
+} from "lucide-react";
+import { useState } from "react";
+
+export default function MultiImageUpload() {
+  const [images, setImages] = useState([]);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    const newImages = files.map((file) => ({
+      id: Math.random().toString(36).substr(2, 9),
+      file,
+      preview: URL.createObjectURL(file),
+      status: "pending", // pending, uploading, success, error
+      s3Url: null,
+      error: null,
+    }));
+    setImages((prev) => [...prev, ...newImages]);
+  };
+
+  const removeImage = (id) => {
+    setImages((prev) => {
+      const updated = prev.filter((img) => img.id !== id);
+      const removed = prev.find((img) => img.id === id);
+      if (removed) URL.revokeObjectURL(removed.preview);
+      return updated;
+    });
+  };
+
+  const uploadToS3 = async (image) => {
+    const formData = new FormData();
+    formData.append("file", image.file);
+
+    try {
+      // Replace with your actual API endpoint
+      const response = await fetch(
+        "https://vendorapi.awfis.com:7443/api/v1/addimage",
+        {
+          method: "POST",
+          body: formData,
+          // Add headers if needed (e.g., authorization)
+          // headers: { 'Authorization': 'Bearer YOUR_TOKEN' }
+        }
+      );
+
+      if (!response.ok) throw new Error("Upload failed");
+
+      const data = await response.json();
+      return data.data.filepath; // Adjust based on your API response
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const downloadCSV = (urls) => {
+    // Create CSV content
+    const csvContent = [
+      ["Filename", "S3 URL", "Upload Date"],
+      ...urls.map((item, idx) => [
+        item.filename,
+        item.url,
+        new Date().toISOString(),
+      ]),
+    ]
+      .map((row) => row.join(","))
+      .join("\n");
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+
+    link.setAttribute("href", url);
+    link.setAttribute("download", `s3-urls-${Date.now()}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleUploadAll = async () => {
+    setUploading(true);
+    const pendingImages = images.filter((img) => img.status === "pending");
+
+    for (const image of pendingImages) {
+      setImages((prev) =>
+        prev.map((img) =>
+          img.id === image.id ? { ...img, status: "uploading" } : img
+        )
+      );
+
+      try {
+        const s3Url = await uploadToS3(image);
+        setImages((prev) =>
+          prev.map((img) =>
+            img.id === image.id ? { ...img, status: "success", s3Url } : img
+          )
+        );
+      } catch (error) {
+        setImages((prev) =>
+          prev.map((img) =>
+            img.id === image.id
+              ? { ...img, status: "error", error: error.message }
+              : img
+          )
+        );
+      }
+    }
+
+    setUploading(false);
+
+    // Automatically download CSV after all uploads complete
+    const successfulUploads = images
+      .filter((img) => img.status === "success" && img.s3Url)
+      .map((img) => ({
+        filename: img.file.name,
+        url: img.s3Url,
+      }));
+
+    // if (successfulUploads.length > 0) {
+    //   downloadCSV(successfulUploads);
+    // }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case "uploading":
+        return <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />;
+      case "success":
+        return <CheckCircle className="w-5 h-5 text-green-500" />;
+      case "error":
+        return <AlertCircle className="w-5 h-5 text-red-500" />;
+      default:
+        return null;
+    }
+  };
+
+  const successCount = images.filter((img) => img.status === "success").length;
+  const s3Urls = images
+    .filter((img) => img.status === "success")
+    .map((img) => img.s3Url);
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.js
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="max-w-4xl mx-auto p-6">
+      <div className="bg-white rounded-lg shadow-lg p-6">
+        <h2 className="text-2xl font-bold mb-6 text-gray-800">
+          Multiple Image Upload
+        </h2>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+        {/* Upload Area */}
+        <div className="mb-6">
+          <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition">
+            <div className="flex flex-col items-center justify-center pt-5 pb-6">
+              <Upload className="w-10 h-10 text-gray-400 mb-3" />
+              <p className="mb-2 text-sm text-gray-500">
+                <span className="font-semibold">Click to upload</span> or drag
+                and drop
+              </p>
+              <p className="text-xs text-gray-400">PNG, JPG, GIF up to 10MB</p>
+            </div>
+            <input
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={handleFileSelect}
+              className="hidden"
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          </label>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        {/* Image Preview Grid */}
+        {images.length > 0 && (
+          <div className="mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {images.map((image) => (
+                <div
+                  key={image.id}
+                  className="relative group rounded-lg overflow-hidden border-2 border-gray-200"
+                >
+                  <img
+                    src={image.preview}
+                    alt="Preview"
+                    className="w-full h-32 object-cover"
+                  />
+
+                  {/* Status Overlay */}
+                  <div
+                    style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
+                    className="absolute inset-0 flex items-center justify-center"
+                  >
+                    {getStatusIcon(image.status)}
+                  </div>
+
+                  {/* Remove Button */}
+                  <button
+                    onClick={() => removeImage(image.id)}
+                    className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+
+                  {/* Error Message */}
+                  {image.error && (
+                    <div className="absolute bottom-0 left-0 right-0 bg-red-500 text-white text-xs p-1 text-center">
+                      {image.error}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Upload Button */}
+        {images.length > 0 && (
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-600">
+              {successCount > 0 && (
+                <span className="text-green-600 font-medium">
+                  {successCount} of {images.length} uploaded
+                </span>
+              )}
+              {successCount === 0 && (
+                <span>{images.length} image(s) selected</span>
+              )}
+            </div>
+            <button
+              onClick={handleUploadAll}
+              disabled={
+                uploading || images.every((img) => img.status !== "pending")
+              }
+              className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition flex items-center gap-2"
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4" />
+                  Upload All
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* S3 URLs Display with Manual Download */}
+        {s3Urls.length > 0 && (
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-gray-700">S3 URLs:</h3>
+              <button
+                onClick={() =>
+                  downloadCSV(
+                    images
+                      .filter((img) => img.status === "success" && img.s3Url)
+                      .map((img) => ({
+                        filename: img.file.name,
+                        url: img.s3Url,
+                      }))
+                  )
+                }
+                className="flex items-center gap-1 text-sm bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 transition"
+              >
+                <Download className="w-4 h-4" />
+                Download CSV
+              </button>
+            </div>
+            <div className="space-y-1">
+              {s3Urls.map((url, idx) => (
+                <div key={idx} className="text-xs text-gray-600 break-all">
+                  {url}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
